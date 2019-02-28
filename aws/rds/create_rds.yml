@@ -1,0 +1,78 @@
+## AWS credentials, Region, AZ are obtained from environment variables
+
+---
+- hosts: 127.0.0.1
+  connection: local
+
+  tasks:
+
+  - name: Create the environment security group
+    ec2_group:
+     name: "{{ instance_name }}"
+     description: sg with rule descriptions
+     vpc_id: "{{ vpcid }}"
+     rules:
+      - proto: tcp
+        from_port: 3306
+        to_port: 3306
+        cidr_ip: 0.0.0.0/0
+        rule_desc: allow connections on port 3306
+    register: new_sg_facts
+
+  - name: Create free-tier RDS instace
+    rds:
+     command: create
+     instance_name: "{{ instance_name }}"
+     db_engine: MySQL
+     wait: yes
+     wait_timeout: 900
+     size: 5
+     instance_type: db.t2.micro
+     username: "{{ admin_username }}"
+     password: "{{ admin_password }}"
+     vpc_security_groups: "{{ new_sg_facts['group_id'] }}"
+     #multi_zone: yes
+     #backup_retention: 10
+     #backup_window: 01:00-04:00
+     tags:
+      environment: "{{ environment_name }}"
+    register: new_database_facts
+
+
+  - name: Create free-tier read replica
+    rds:
+     command: replicate
+     instance_name: "{{ instance_name }}-readreplica"
+     source_instance: "{{ instance_name }}"
+     wait: yes
+     wait_timeout: 600
+
+
+  - name: Creating rw user
+    mysql_user:
+     login_user: "{{ admin_username }}"
+     login_password: "{{ admin_password }}"
+     login_host: "{{ new_database_facts['instance']['endpoint'] }}"
+     login_port: 3306
+     name: "rw_user"
+     host: "%"
+     password: myS3Cre7pass!
+     priv: "{{ instance_name }}.*:select,delete,insert,update"
+     state: present
+
+  - name: Creating ro user
+    mysql_user:
+     login_user: "{{ admin_username }}"
+     login_password: "{{ admin_password }}"
+     login_host: "{{ new_database_facts['instance']['endpoint'] }}"
+     login_port: 3306
+     name: "ro_user"
+     host: "%"
+     password: myS3Cre7pass!
+     priv: "{{ instance_name }}.*:select"
+     state: present
+
+  - name: Display endpoint
+    debug:
+     var: new_database_facts['instance']['endpoint']
+
